@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "EVI",
+    "slug": "evi",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "evi",
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "color": "#E891A5",
+          "defaultChannel": "evi-default"
+        }
+      ]
+    ],
+    "experiments": { "typedRoutes": true },
+    "android": {
+      "package": "com.eviluna.evi",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.eviluna.evi"
+    }
+  }
+}

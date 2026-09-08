@@ -6,7 +6,7 @@ interface ConfirmButtonProps extends TouchableOpacityProps {
   title: string;
   icon?: string;
   loading?: boolean;
-  variant?: 'primary' | 'secondary' | 'accent';
+  variant?: 'primary' | 'secondary' | 'accent' | 'success';
 }
 
 export const ConfirmButton: React.FC<ConfirmButtonProps> = ({
@@ -20,8 +20,16 @@ export const ConfirmButton: React.FC<ConfirmButtonProps> = ({
 }) => {
   const bgColors = {
     primary: colors.rose,
-    secondary: colors.lavenderDark,
+    secondary: colors.lavender,
     accent: colors.roseDark,
+    success: colors.success,
+  };
+
+  const textColors = {
+    primary: colors.white,
+    secondary: colors.lavenderDark,
+    accent: colors.white,
+    success: colors.white,
   };
 
   return (
@@ -40,7 +48,7 @@ export const ConfirmButton: React.FC<ConfirmButtonProps> = ({
       {loading ? (
         <ActivityIndicator color={colors.white} size="small" />
       ) : (
-        <Text style={styles.text}>
+        <Text style={[styles.text, { color: textColors[variant] }]}>
           {title} {icon ? `${icon}` : ''}
         </Text>
       )}

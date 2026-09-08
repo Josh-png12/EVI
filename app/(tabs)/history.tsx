@@ -3,6 +3,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEvi } from '../../src/hooks/use-evi';
 import { buildHistoryEntries } from '../../src/domain/history';
+import { localDateKey } from '../../src/domain/date';
 import { mealMeta } from '../../src/types';
 import { colors, fontSize, radius, spacing } from '../../src/theme';
 import { EviCard } from '../../src/components/EviCard';
@@ -16,12 +17,12 @@ export default function HistoryScreen() {
   const dateKeys = Object.keys(historyMap);
 
   const formatHeaderDate = (dateStr: string) => {
-    const today = new Date().toLocaleDateString('en-CA');
+    const today = localDateKey(new Date());
     if (dateStr === today) return 'Hoy';
 
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    if (dateStr === yesterday.toLocaleDateString('en-CA')) return 'Ayer';
+    if (dateStr === localDateKey(yesterday)) return 'Ayer';
 
     // Format like "Miércoles, 4 de Septiembre"
     const [year, month, day] = dateStr.split('-').map(Number);

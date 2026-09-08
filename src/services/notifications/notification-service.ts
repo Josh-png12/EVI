@@ -7,7 +7,11 @@ declare const require: (moduleName: string) => unknown;
 
 type NotificationModule = {
   AndroidImportance: { HIGH: unknown };
-  SchedulableTriggerInputTypes: { DAILY: unknown; TIME_INTERVAL: unknown };
+  SchedulableTriggerInputTypes: {
+    DAILY: unknown;
+    WEEKLY: unknown;
+    TIME_INTERVAL: unknown;
+  };
   setNotificationHandler: (handler: unknown) => void;
   setNotificationChannelAsync: (channelId: string, channel: unknown) => Promise<unknown>;
   getPermissionsAsync: () => Promise<{ status: string }>;
@@ -27,17 +31,22 @@ function getNotificationsModule(): NotificationModule | null {
   if (!nativeNotificationsAvailable) return null;
   if (notifications) return notifications;
 
-  notifications = require('expo-notifications') as NotificationModule;
-  notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
-  });
-  return notifications;
+  try {
+    notifications = require('expo-notifications') as NotificationModule;
+    notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+    return notifications;
+  } catch (error) {
+    console.error('EVI native notifications are unavailable', error);
+    return null;
+  }
 }
 
 export function areNativeNotificationsAvailable(): boolean {
@@ -48,13 +57,17 @@ export function areNativeNotificationsAvailable(): boolean {
 export async function setupNotificationChannel(): Promise<void> {
   const module = getNotificationsModule();
   if (module && Platform.OS === 'android') {
-    await module.setNotificationChannelAsync('evi-default', {
-      name: 'Recordatorios EVI',
-      importance: module.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#E891A5',
-      sound: 'default',
-    });
+    try {
+      await module.setNotificationChannelAsync('evi-default', {
+        name: 'Recordatorios EVI',
+        importance: module.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#E891A5',
+        sound: 'default',
+      });
+    } catch (error) {
+      console.error('Unable to configure EVI notification channel', error);
+    }
   }
 }
 
@@ -63,17 +76,27 @@ export async function requestNotificationPermissions(): Promise<NotificationPerm
   const module = getNotificationsModule();
   if (!module) return { available: false, granted: false };
 
-  const { status: existing } = await module.getPermissionsAsync();
-  if (existing === 'granted') return { available: true, granted: true };
-  const { status } = await module.requestPermissionsAsync();
-  return { available: true, granted: status === 'granted' };
+  try {
+    const { status: existing } = await module.getPermissionsAsync();
+    if (existing === 'granted') return { available: true, granted: true };
+    const { status } = await module.requestPermissionsAsync();
+    return { available: true, granted: status === 'granted' };
+  } catch (error) {
+    console.error('Unable to request EVI notification permissions', error);
+    return { available: true, granted: false };
+  }
 }
 
 export async function hasNotificationPermissions(): Promise<boolean> {
   const module = getNotificationsModule();
   if (!module) return false;
-  const { status } = await module.getPermissionsAsync();
-  return status === 'granted';
+  try {
+    const { status } = await module.getPermissionsAsync();
+    return status === 'granted';
+  } catch (error) {
+    console.error('Unable to read EVI notification permissions', error);
+    return false;
+  }
 }
 
 // ─── Notification content helpers ─────────────────────────────────────────────
@@ -97,6 +120,130 @@ function snoozeNotificationId(medicationId: string, mealType: MealType): string 
   return `evi-snooze-${medicationId}-${mealType}`;
 }
 
+function medicationNotificationId(medicationId: string): string {
+  return `evi-medication-${medicationId}`;
+}
+
+function parseTime(value?: string): { hour: number; minute: number } | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(value ?? '');
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return { hour, minute };
+}
+
+function nextIntervalSeconds(time: string, intervalHours: number, now: Date): number | null {
+  const parsed = parseTime(time);
+  if (!parsed || !Number.isInteger(intervalHours) || intervalHours <= 0) return null;
+
+  const anchor = new Date(now);
+  anchor.setHours(parsed.hour, parsed.minute, 0, 0);
+  const intervalMs = intervalHours * 60 * 60 * 1000;
+  let next = anchor.getTime();
+  while (next <= now.getTime()) next += intervalMs;
+  return Math.max(60, Math.round((next - now.getTime()) / 1000));
+}
+
+function mealNotificationRequest(
+  module: NotificationModule,
+  medication: Medication,
+  mealType: MealType,
+  settings: AppSettings,
+  mealEvents: MealEvent[],
+): unknown | null {
+  const time = parseTime(usualMealTime(mealEvents, mealType, settings.referenceTimes[mealType]));
+  if (!time) return null;
+  return {
+    identifier: notificationId(medication.id, mealType),
+    content: {
+      title: `EVI 🌸  ${medication.name}`,
+      body: `${mealBodyText[mealType]} (${mealLabel[mealType]})`,
+      sound: 'default',
+      data: { medicationId: medication.id, mealType },
+    },
+    trigger: {
+      type: module.SchedulableTriggerInputTypes.DAILY,
+      hour: time.hour,
+      minute: time.minute,
+    },
+  };
+}
+
+function medicationNotificationRequest(
+  module: NotificationModule,
+  medication: Medication,
+  settings: AppSettings,
+  mealEvents: MealEvent[],
+): unknown | null {
+  const schedule = medication.schedule;
+  if (!schedule) return null;
+
+  if (schedule.type === 'BEFORE_MEAL' || schedule.type === 'WITH_MEAL' || schedule.type === 'AFTER_MEAL') {
+    return null;
+  }
+
+  if (schedule.type === 'TIME') {
+    const time = parseTime(schedule.time);
+    if (!time) return null;
+    return {
+      identifier: medicationNotificationId(medication.id),
+      content: {
+        title: `EVI 🌸  ${medication.name}`,
+        body: 'Tienes un recordatorio registrado para este medicamento.',
+        sound: 'default',
+        data: { medicationId: medication.id, scheduleType: schedule.type },
+      },
+      trigger: {
+        type: module.SchedulableTriggerInputTypes.DAILY,
+        hour: time.hour,
+        minute: time.minute,
+      },
+    };
+  }
+
+  if (schedule.type === 'INTERVAL' && schedule.time && schedule.intervalHours) {
+    const seconds = nextIntervalSeconds(schedule.time, schedule.intervalHours, new Date());
+    if (!seconds) return null;
+    return {
+      identifier: medicationNotificationId(medication.id),
+      content: {
+        title: `EVI 🌸  ${medication.name}`,
+        body: `Tienes un recordatorio registrado cada ${schedule.intervalHours} horas.`,
+        sound: 'default',
+        data: { medicationId: medication.id, scheduleType: schedule.type },
+      },
+      trigger: {
+        type: module.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds,
+        repeats: true,
+      },
+    };
+  }
+
+  if (schedule.type === 'WEEKDAYS' && schedule.time && schedule.weekdays?.length) {
+    const time = parseTime(schedule.time);
+    if (!time) return null;
+    return schedule.weekdays.map((weekday) => ({
+      identifier: `${medicationNotificationId(medication.id)}-${weekday}`,
+      content: {
+        title: `EVI 🌸  ${medication.name}`,
+        body: 'Tienes un recordatorio registrado para este día.',
+        sound: 'default',
+        data: { medicationId: medication.id, scheduleType: schedule.type, weekday },
+      },
+      trigger: {
+        type: module.SchedulableTriggerInputTypes.WEEKLY,
+        weekday: weekday === 0 ? 1 : weekday + 1,
+        hour: time.hour,
+        minute: time.minute,
+      },
+    }));
+  }
+
+  return null;
+}
+
 // ─── Scheduling ───────────────────────────────────────────────────────────────
 export async function scheduleAllNotifications(
   medications: Medication[],
@@ -106,32 +253,35 @@ export async function scheduleAllNotifications(
   const module = getNotificationsModule();
   if (!module) return;
 
-  await module.cancelAllScheduledNotificationsAsync();
+  try {
+    await module.cancelAllScheduledNotificationsAsync();
 
-  const active = medications.filter((m) => m.active);
+    const active = medications.filter((m) => m.active);
 
-  for (const med of active) {
-    for (const mealType of med.mealTypes) {
-      const timeStr = usualMealTime(mealEvents, mealType, settings.referenceTimes[mealType]);
-      const parts = timeStr.split(':');
-      const hour = parseInt(parts[0] ?? '8', 10);
-      const minute = parseInt(parts[1] ?? '0', 10);
+    for (const med of active) {
+      const isMealSchedule = med.schedule
+        ? ['BEFORE_MEAL', 'WITH_MEAL', 'AFTER_MEAL'].includes(med.schedule.type) &&
+          (med.schedule.mealTypes?.length ?? 0) > 0
+        : med.mealTypes.length > 0;
+      const mealTypes = med.schedule?.mealTypes ?? med.mealTypes;
 
-      await module.scheduleNotificationAsync({
-        identifier: notificationId(med.id, mealType),
-        content: {
-          title: `EVI 🌸  ${med.name}`,
-          body: mealBodyText[mealType],
-          sound: 'default',
-          data: { medicationId: med.id, mealType },
-        },
-        trigger: {
-          type: module.SchedulableTriggerInputTypes.DAILY,
-          hour,
-          minute,
-        },
-      });
+      if (isMealSchedule) {
+        for (const mealType of mealTypes) {
+          const request = mealNotificationRequest(module, med, mealType, settings, mealEvents);
+          if (request) await module.scheduleNotificationAsync(request);
+        }
+        continue;
+      }
+
+      const request = medicationNotificationRequest(module, med, settings, mealEvents);
+      if (Array.isArray(request)) {
+        for (const item of request) await module.scheduleNotificationAsync(item);
+      } else if (request) {
+        await module.scheduleNotificationAsync(request);
+      }
     }
+  } catch (error) {
+    console.error('Unable to schedule EVI notifications', error);
   }
 }
 
@@ -152,7 +302,11 @@ export async function rescheduleIfPermitted(
 export async function cancelAllNotifications(): Promise<void> {
   const module = getNotificationsModule();
   if (!module) return;
-  await module.cancelAllScheduledNotificationsAsync();
+  try {
+    await module.cancelAllScheduledNotificationsAsync();
+  } catch (error) {
+    console.error('Unable to cancel EVI notifications', error);
+  }
 }
 
 // ─── Snooze ───────────────────────────────────────────────────────────────────
@@ -173,20 +327,24 @@ export async function scheduleSnoozeNotification(
     // Ignore — notification might not exist
   }
 
-  await module.scheduleNotificationAsync({
-    identifier: id,
-    content: {
-      title: `EVI 🌸  ${medication.name}`,
-      body: `Recordatorio: tu ${mealLabel[mealType]} te está esperando 💊`,
-      sound: 'default',
-      data: { medicationId: medication.id, mealType, snooze: true },
-    },
-    trigger: {
-      type: module.SchedulableTriggerInputTypes.TIME_INTERVAL,
-      seconds: delayMinutes * 60,
-      repeats: false,
-    },
-  });
+  try {
+    await module.scheduleNotificationAsync({
+      identifier: id,
+      content: {
+        title: `EVI 🌸  ${medication.name}`,
+        body: `Recordatorio: tu ${mealLabel[mealType]} te está esperando 💊`,
+        sound: 'default',
+        data: { medicationId: medication.id, mealType, snooze: true },
+      },
+      trigger: {
+        type: module.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: delayMinutes * 60,
+        repeats: false,
+      },
+    });
+  } catch (error) {
+    console.error('Unable to schedule EVI snooze notification', error);
+  }
 }
 
 export async function scheduleDailyReminders(

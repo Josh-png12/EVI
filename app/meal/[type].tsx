@@ -13,7 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEvi } from '../../src/hooks/use-evi';
 import { MealType, mealMeta, Medication } from '../../src/types';
-import { dosesForMeal } from '../../src/domain/routine';
+import { dosesForMeal, mealRelationshipLabel } from '../../src/domain/routine';
 import { colors, fontSize, radius, spacing } from '../../src/theme';
 import { EviCard } from '../../src/components/EviCard';
 import { ConfirmButton } from '../../src/components/ConfirmButton';
@@ -21,7 +21,7 @@ import { GhostButton } from '../../src/components/GhostButton';
 
 export default function MealDetailScreen() {
   const router = useRouter();
-  const { type } = useLocalSearchParams<{ type: string }>();
+  const { type, contextual } = useLocalSearchParams<{ type: string; contextual?: string }>();
   const mealType = (type as MealType) || 'lunch';
   const meta = mealMeta[mealType] || mealMeta.lunch;
 
@@ -90,12 +90,14 @@ export default function MealDetailScreen() {
           <View style={styles.header}>
             <Text style={styles.mealEmoji}>{meta.emoji}</Text>
             <Text style={styles.title}>Momento de {meta.label.toLowerCase()}</Text>
-            <GhostButton
-              title="Registrar que comí"
-              color={colors.roseDark}
-              onPress={handleRegisterMeal}
-              style={styles.registerMealBtn}
-            />
+            {contextual !== '1' && (
+              <GhostButton
+                title="Registrar que comí"
+                color={colors.roseDark}
+                onPress={handleRegisterMeal}
+                style={styles.registerMealBtn}
+              />
+            )}
           </View>
 
           {pendingMeds.length === 0 ? (
@@ -116,12 +118,13 @@ export default function MealDetailScreen() {
             /* Has pending medications */
             <View>
               <Text style={styles.noticeBanner}>
-                💊 Antes de tu {meta.label.toLowerCase()} tienes una toma programada:
+                💊 Para tu {meta.label.toLowerCase()} tienes registrado:
               </Text>
 
               {pendingMeds.map((med) => (
                 <EviCard key={med.id} variant="white" style={styles.medCard}>
                   <Text style={styles.medName}>{med.name}</Text>
+                  <Text style={styles.relationshipLabel}>{mealRelationshipLabel(med)}</Text>
 
                   <View style={styles.instructionsBox}>
                     <Text style={styles.instructionsLabel}>Indicaciones médicas:</Text>
@@ -142,6 +145,7 @@ export default function MealDetailScreen() {
                   <View style={styles.actionsGroup}>
                     <ConfirmButton
                       title="Ya la tomé 💗"
+                      variant="success"
                       loading={loading}
                       onPress={() => handleTakeDose(med)}
                     />
@@ -215,6 +219,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xl,
     fontWeight: '700',
     color: colors.plum,
+  },
+  relationshipLabel: {
+    fontSize: fontSize.sm,
+    color: colors.lavenderDark,
+    marginTop: 2,
   },
   instructionsBox: {
     backgroundColor: colors.blush,

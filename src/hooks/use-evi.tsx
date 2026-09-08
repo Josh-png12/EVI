@@ -1,6 +1,7 @@
-import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppData, AppSettings, DoseLog, MealEvent, MealType, Medication } from '../types';
 import { defaultData, loadData, saveData } from '../services/storage/local-repository';
+import { isMedicationTakenToday } from '../domain/routine';
 import { rescheduleIfPermitted, scheduleSnoozeNotification } from '../services/notifications/notification-service';
 
 type EviContextValue = {
@@ -27,7 +28,13 @@ type EviContextValue = {
 };
 
 const EviContext = createContext<EviContextValue | null>(null);
-const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const generateId = (existingIds: string[] = []) => {
+  let id = '';
+  do {
+    id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  } while (existingIds.includes(id));
+  return id;
+};
 
 function normalizeMedication(
   medication: Omit<Medication, 'id' | 'createdAt'>,
@@ -41,25 +48,41 @@ function normalizeMedication(
 export function EviProvider({ children }: PropsWithChildren) {
   const [data, setData] = useState<AppData>(defaultData);
   const [ready, setReady] = useState(false);
+  const dataRef = useRef(data);
+  const mutationQueue = useRef(Promise.resolve());
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    loadData().then((value) => {
-      setData(value);
-      setReady(true);
-      // Auto sync notifications if already permitted
-      rescheduleIfPermitted(value.medications, value.settings, value.mealEvents);
-    });
+    loadData()
+      .then((value) => {
+        dataRef.current = value;
+        if (mountedRef.current) {
+          setData(value);
+          setReady(true);
+        }
+        void rescheduleIfPermitted(value.medications, value.settings, value.mealEvents);
+      })
+      .catch((error) => {
+        console.error('Unable to load EVI data', error);
+        if (mountedRef.current) setReady(true);
+      });
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const persistAndUpdate = async (updater: (current: AppData) => AppData): Promise<AppData> => {
-    let nextState: AppData = data;
-    setData((current) => {
-      nextState = updater(current);
+    const operation = mutationQueue.current.then(async () => {
+      const nextState = updater(dataRef.current);
+      await saveData(nextState);
+      dataRef.current = nextState;
+      if (mountedRef.current) setData(nextState);
+      await rescheduleIfPermitted(nextState.medications, nextState.settings, nextState.mealEvents);
       return nextState;
     });
-    await saveData(nextState);
-    await rescheduleIfPermitted(nextState.medications, nextState.settings, nextState.mealEvents);
-    return nextState;
+    mutationQueue.current = operation.then(() => undefined, () => undefined);
+    return operation;
   };
 
   const registerMealEvent = async (
@@ -71,18 +94,26 @@ export function EviProvider({ children }: PropsWithChildren) {
       isOutOfRoutine?: boolean;
     } = {},
   ) => {
+    const occurredAt = options.occurredAt && !Number.isNaN(new Date(options.occurredAt).getTime())
+      ? options.occurredAt
+      : new Date().toISOString();
+
     const newEvent: MealEvent = {
-      id: generateId(),
+      id: generateId(dataRef.current.mealEvents.map((event) => event.id)),
       mealType,
-      occurredAt: options.occurredAt ?? new Date().toISOString(),
+      occurredAt,
       source: options.source ?? 'manual',
       note: options.note,
       isOutOfRoutine: options.isOutOfRoutine,
     };
-    await persistAndUpdate((current) => ({
-      ...current,
-      mealEvents: [...current.mealEvents, newEvent],
-    }));
+    await persistAndUpdate((current) => {
+      const eventTime = new Date(newEvent.occurredAt).getTime();
+      const duplicate = current.mealEvents.some((event) =>
+        event.mealType === newEvent.mealType &&
+        Math.abs(new Date(event.occurredAt).getTime() - eventTime) < 2000,
+      );
+      return duplicate ? current : { ...current, mealEvents: [...current.mealEvents, newEvent] };
+    });
   };
 
   const value = useMemo<EviContextValue>(
@@ -91,37 +122,43 @@ export function EviProvider({ children }: PropsWithChildren) {
       ready,
 
       completeOnboarding: async (name, medications, referenceTimes) => {
-        const newMeds: Medication[] = medications.map((m) => ({
-          ...normalizeMedication(m),
-          id: generateId(),
-          createdAt: new Date().toISOString(),
-        }));
+        await persistAndUpdate((current) => {
+          const existingIds = current.medications.map((medication) => medication.id);
+          const newMeds: Medication[] = medications.map((m) => {
+            const id = generateId(existingIds);
+            existingIds.push(id);
+            return {
+              ...normalizeMedication(m),
+              id,
+              createdAt: new Date().toISOString(),
+            };
+          });
 
-        await persistAndUpdate((current) => ({
-          ...current,
-          onboardingComplete: true,
-          settings: {
-            ...current.settings,
-            name: name.trim() || 'Evi',
-            referenceTimes: {
-              ...current.settings.referenceTimes,
-              ...referenceTimes,
+          return {
+            ...current,
+            onboardingComplete: true,
+            settings: {
+              ...current.settings,
+              name: name.trim() || 'Evi',
+              referenceTimes: {
+                ...current.settings.referenceTimes,
+                ...referenceTimes,
+              },
             },
-          },
-          medications: [...current.medications, ...newMeds],
-        }));
+            medications: [...current.medications, ...newMeds],
+          };
+        });
       },
 
       addMedication: async (medication) => {
-        const newMed: Medication = {
-          ...normalizeMedication(medication),
-          id: generateId(),
-          createdAt: new Date().toISOString(),
-        };
-        await persistAndUpdate((current) => ({
-          ...current,
-          medications: [...current.medications, newMed],
-        }));
+        await persistAndUpdate((current) => {
+          const newMed: Medication = {
+            ...normalizeMedication(medication),
+            id: generateId(current.medications.map((item) => item.id)),
+            createdAt: new Date().toISOString(),
+          };
+          return { ...current, medications: [...current.medications, newMed] };
+        });
       },
 
       updateMedication: async (id, updates) => {
@@ -155,19 +192,19 @@ export function EviProvider({ children }: PropsWithChildren) {
       },
 
       recordDose: async (medication, mealType, note) => {
-        const newLog: DoseLog = {
-          id: generateId(),
-          medicationId: medication.id,
-          medicationName: medication.name,
-          mealType,
-          occurredAt: new Date().toISOString(),
-          status: 'taken',
-          note,
-        };
-        await persistAndUpdate((current) => ({
-          ...current,
-          doseLogs: [...current.doseLogs, newLog],
-        }));
+        await persistAndUpdate((current) => {
+          if (isMedicationTakenToday(current.doseLogs, medication.id, mealType)) return current;
+          const newLog: DoseLog = {
+            id: generateId(current.doseLogs.map((log) => log.id)),
+            medicationId: medication.id,
+            medicationName: medication.name,
+            mealType,
+            occurredAt: new Date().toISOString(),
+            status: 'taken',
+            note,
+          };
+          return { ...current, doseLogs: [...current.doseLogs, newLog] };
+        });
       },
 
       snoozeDose: async (medication, mealType, delayMinutes = 30) => {
@@ -178,8 +215,7 @@ export function EviProvider({ children }: PropsWithChildren) {
       recordMealEvent: async (mealType) => registerMealEvent(mealType),
 
       reset: async () => {
-        await saveData(defaultData);
-        setData(defaultData);
+        await persistAndUpdate(() => defaultData);
       },
     }),
     [data, ready]

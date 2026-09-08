@@ -1,15 +1,15 @@
 export const colors = {
-  cream: '#FFF9F5',
-  blush: '#FCECEF',
-  rose: '#E891A5',
-  roseDark: '#9B4C61',
-  lavender: '#EDE7F8',
-  lavenderDark: '#75608E',
-  plum: '#493747',
-  muted: '#7D6C76',
+  cream: '#FAF8F5',
+  blush: '#E9E2F4',
+  rose: '#7665A8',
+  roseDark: '#7665A8',
+  lavender: '#E9E2F4',
+  lavenderDark: '#7665A8',
+  plum: '#40384D',
+  muted: '#8993A8',
   white: '#FFFFFF',
-  line: '#F1DCE2',
-  success: '#6E997B',
+  line: '#E2DDEB',
+  success: '#9BAF9A',
 };
 
 export const spacing = {
@@ -40,14 +40,14 @@ export const fontSize = {
 
 export const shadow = {
   sm: {
-    shadowColor: '#C87090',
+    shadowColor: '#7665A8',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 2,
   },
   md: {
-    shadowColor: '#C87090',
+    shadowColor: '#7665A8',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 16,

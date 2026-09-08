@@ -61,9 +61,27 @@ export interface LearnedMealRoutine {
   confidence: RoutineConfidence;
 }
 
+export type MedicationStatusKind = 'pending' | 'taken' | 'upcoming';
+
+export interface MedicationStatusItem {
+  medication: Medication;
+  status: MedicationStatusKind;
+  contextLabel: string;
+  dueAt?: string;
+}
+
+export interface CurrentMedicationStatus {
+  now: Date;
+  pending: MedicationStatusItem[];
+  next?: MedicationStatusItem;
+  taken: MedicationStatusItem[];
+  upcoming: MedicationStatusItem[];
+}
+
 export interface AppSettings {
   name: string;
   referenceTimes: Record<MealType, string>;
+  mealContextDismissedOn?: string;
 }
 
 export interface AppData {

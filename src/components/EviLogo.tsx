@@ -24,7 +24,7 @@ export const EviLogo: React.FC<EviLogoProps> = ({ size = 'md' }) => {
         },
       ]}
     >
-      <Text style={[styles.emojis, { fontSize: sizes.font }]}>🌸🌙</Text>
+      <Text style={[styles.emojis, { fontSize: sizes.font }]}>🪻🌙</Text>
     </View>
   );
 };

@@ -1,7 +1,8 @@
 import { DoseLog, HistoryEntry, MealType, Medication, mealTypes } from '../types';
+import { localDateKey } from './date';
 
-const dateKey = (d: Date | string) => new Date(d).toLocaleDateString('en-CA');
-const todayKey = () => dateKey(new Date());
+const dateKey = localDateKey;
+const todayKey = () => localDateKey(new Date());
 
 /**
  * Builds a history map keyed by YYYY-MM-DD for the last `daysBack` days.

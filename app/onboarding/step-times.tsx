@@ -75,7 +75,7 @@ export default function StepTimesScreen() {
           <View style={styles.tipBox}>
             <Text style={styles.tipTitle}>💡 Recuerda</Text>
             <Text style={styles.tipText}>
-              La acción principal en tu día a día siempre será presionar <Text style={styles.bold}>"Estoy por comer"</Text>. EVI irá aprendiendo tus momentos reales.
+              La acción principal en tu día a día siempre será presionar <Text style={styles.bold}>"Estoy por comer"</Text>. EVI irá conociendo tus horarios habituales, pero tú tienes el control.
             </Text>
           </View>
         </ScrollView>

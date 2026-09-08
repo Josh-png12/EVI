@@ -11,7 +11,7 @@ interface PillBadgeProps {
 export const PillBadge: React.FC<PillBadgeProps> = ({ status, customLabel }) => {
   const config = {
     taken: {
-      bg: '#EAF5EC',
+      bg: '#EEF3EC',
       color: colors.success,
       text: customLabel || 'Tomada ✨',
     },
@@ -26,7 +26,7 @@ export const PillBadge: React.FC<PillBadgeProps> = ({ status, customLabel }) => 
       text: customLabel || 'Pospuesta ⏰',
     },
     unrecorded: {
-      bg: '#F5F0EB',
+      bg: '#F1EFEC',
       color: colors.muted,
       text: customLabel || 'Sin registro',
     },

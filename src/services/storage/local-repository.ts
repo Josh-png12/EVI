@@ -53,9 +53,10 @@ function isDoseLog(value: unknown): value is DoseLog {
     typeof log.id === 'string' &&
     typeof log.medicationId === 'string' &&
     typeof log.medicationName === 'string' &&
-    isMealType(log.mealType) &&
+    (log.mealType === undefined || isMealType(log.mealType)) &&
     isValidIsoDate(log.occurredAt) &&
     log.status === 'taken' &&
+    (log.scheduledAt === undefined || isValidIsoDate(log.scheduledAt)) &&
     (log.note === undefined || typeof log.note === 'string')
   );
 }

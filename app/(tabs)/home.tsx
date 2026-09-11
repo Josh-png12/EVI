@@ -22,7 +22,7 @@ import { GhostButton } from '../../src/components/GhostButton';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { data, registerMealEvent, updateSettings } = useEvi();
+  const { data, registerMealEvent, updateSettings, recordDose } = useEvi();
   const { settings, medications, doseLogs, mealEvents } = data;
   const [contextDismissed, setContextDismissed] = useState(false);
   const [contextLoading, setContextLoading] = useState(false);
@@ -90,6 +90,15 @@ export default function HomeScreen() {
 
   const handleNotYet = () => {
     void dismissContext();
+  };
+
+  const handleRecordStatusDose = async (item: (typeof currentMedicationStatus.pending)[number]) => {
+    try {
+      await recordDose(item.medication, item.mealType, undefined, item.occurrenceAt);
+    } catch (error) {
+      console.error('Error recording dose from home', error);
+      Alert.alert('No pudimos registrar la toma', 'Inténtalo nuevamente.');
+    }
   };
 
   return (
@@ -186,6 +195,14 @@ export default function HomeScreen() {
                   {item.dueAt && <Text style={styles.currentTime}>{item.dueAt}</Text>}
                 </View>
                 <Text style={styles.currentContext}>{item.contextLabel}</Text>
+                {heading === 'Ahora' && (
+                  <ConfirmButton
+                    title="Ya la tomé"
+                    variant="success"
+                    onPress={() => void handleRecordStatusDose(item)}
+                    style={styles.statusDoseButton}
+                  />
+                )}
               </EviCard>
             ))
           )}
@@ -368,6 +385,10 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.muted,
     marginTop: 2,
+  },
+  statusDoseButton: {
+    marginTop: spacing.sm,
+    height: 42,
   },
   currentEmpty: {
     fontSize: fontSize.md,

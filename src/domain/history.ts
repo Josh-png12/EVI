@@ -1,4 +1,4 @@
-import { DoseLog, HistoryEntry, MealType, Medication, mealTypes } from '../types';
+import { DoseLog, HistoryEntry, MealType, Medication } from '../types';
 import { localDateKey } from './date';
 
 const dateKey = localDateKey;
@@ -18,7 +18,7 @@ export function buildHistoryEntries(
   daysBack = 30,
 ): Record<string, HistoryEntry[]> {
   const result: Record<string, HistoryEntry[]> = {};
-  const active = medications.filter((m) => m.active);
+  const active = medications.filter((m) => m.active || doseLogs.some((log) => log.medicationId === m.id));
   if (active.length === 0) return result;
 
   const now = new Date();
@@ -33,7 +33,13 @@ export function buildHistoryEntries(
     const entries: HistoryEntry[] = [];
 
     for (const med of active) {
-      for (const mealType of med.mealTypes) {
+      const medicationLogs = doseLogs.filter((log) => log.medicationId === med.id);
+      const mealTypes = med.mealTypes.length > 0
+        ? med.mealTypes
+        : medicationLogs.length > 0
+        ? [undefined]
+        : [];
+      for (const mealType of mealTypes) {
         const log = doseLogs.find(
           (l) =>
             l.medicationId === med.id &&

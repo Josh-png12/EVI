@@ -30,8 +30,9 @@ export function scheduleMeals(schedule?: MedicationSchedule, fallback: MealType[
 
 export function medicationUsesMeal(
   medication: Medication,
-  mealType: MealType,
+  mealType?: MealType,
 ): boolean {
+  if (!mealType) return false;
   if (!medication.schedule) return medication.mealTypes.includes(mealType);
   if (!['BEFORE_MEAL', 'AFTER_MEAL', 'WITH_MEAL'].includes(medication.schedule.type)) return false;
   return medication.schedule.mealTypes?.includes(mealType) ?? false;
@@ -91,12 +92,15 @@ function itemFor(
   status: MedicationStatusItem['status'],
   contextLabel: string,
   dueAt?: Date,
+  mealType?: MealType,
 ): MedicationStatusItem {
   return {
     medication,
     status,
     contextLabel,
     dueAt: dueAt ? `${String(dueAt.getHours()).padStart(2, '0')}:${String(dueAt.getMinutes()).padStart(2, '0')}` : undefined,
+    occurrenceAt: dueAt?.toISOString(),
+    mealType,
   };
 }
 
@@ -130,7 +134,7 @@ export function getCurrentMedicationStatus(
         if (takenForMeal) {
           taken.push(itemFor(medication, 'taken', label, dueAt ?? undefined));
         } else if (mealEvent) {
-          pending.push(itemFor(medication, 'pending', label, dueAt ?? undefined));
+          pending.push(itemFor(medication, 'pending', label, dueAt ?? undefined, mealType));
         } else if (dueAt && dueAt.getTime() >= now.getTime()) {
           upcoming.push(itemFor(medication, 'upcoming', label, dueAt));
         }
@@ -174,7 +178,7 @@ export function getCurrentMedicationStatus(
 
     const label = schedule.type === 'FASTING' ? 'En ayunas' : schedule.customText || 'Indicación registrada';
     if (medicationLogs.length > 0) taken.push(itemFor(medication, 'taken', label));
-    else upcoming.push(itemFor(medication, 'upcoming', label));
+    else pending.push(itemFor(medication, 'pending', label));
   }
 
   const order = (item: MedicationStatusItem) => item.dueAt ?? '99:99';
@@ -216,9 +220,9 @@ export function mealTypeNearRoutine(
         ? configuredMealMinutes(mealType, { breakfast: learned.learnedTime, lunch: learned.learnedTime, dinner: learned.learnedTime })
         : null;
       const target = learnedMinutes ?? configuredMealMinutes(mealType, referenceTimes);
-      return target === null
-        ? null
-        : { mealType, distance: Math.abs(target - minutesOfDay(now)) };
+      if (target === null) return null;
+      const difference = Math.abs(target - minutesOfDay(now));
+      return { mealType, distance: Math.min(difference, 24 * 60 - difference) };
     })
     .filter((candidate): candidate is { mealType: MealType; distance: number } => candidate !== null)
     .sort((left, right) => left.distance - right.distance);
@@ -237,19 +241,58 @@ export function weeklyProgress(medications: Medication[], logs: DoseLog[]) {
   const start = new Date(now);
   start.setDate(now.getDate() - 6);
   start.setHours(0, 0, 0, 0);
-  const activeRules = medications.filter((m) => m.active).flatMap((m) => m.mealTypes);
-  const byMeal = Object.fromEntries(mealTypes.map((meal) => [meal, { taken: 0, total: activeRules.filter((rule) => rule === meal).length * 7 }])) as Record<MealType, { taken: number; total: number }>;
-  logs.filter((log) => new Date(log.occurredAt) >= start).forEach((log) => { byMeal[log.mealType].taken += 1; });
-  const total = Object.values(byMeal).reduce((sum, item) => sum + item.total, 0);
-  const taken = Object.values(byMeal).reduce((sum, item) => sum + item.taken, 0);
+  const active = medications.filter((medication) => medication.active);
+  const byMeal = Object.fromEntries(mealTypes.map((meal) => [meal, { taken: 0, total: 0 }])) as Record<MealType, { taken: number; total: number }>;
+  let total = 0;
+  let taken = 0;
+
+  for (const medication of active) {
+    const mealRules = medication.mealTypes;
+    if (mealRules.length > 0) {
+      for (const meal of mealRules) byMeal[meal].total += 7;
+      total += mealRules.length * 7;
+    } else if (medication.schedule?.type === 'WEEKDAYS') {
+      const selected = medication.schedule.weekdays ?? [];
+      for (let offset = 0; offset < 7; offset += 1) {
+        const day = new Date(start);
+        day.setDate(start.getDate() + offset);
+        if (selected.includes(day.getDay())) total += 1;
+      }
+    } else if (medication.schedule?.type === 'INTERVAL' && medication.schedule.intervalHours && medication.schedule.time) {
+      const anchor = timeOnDate(now, medication.schedule.time);
+      if (anchor) {
+        const intervalMs = medication.schedule.intervalHours * 60 * 60 * 1000;
+        let occurrence = anchor.getTime();
+        while (occurrence - intervalMs >= start.getTime()) occurrence -= intervalMs;
+        while (occurrence <= now.getTime()) {
+          if (occurrence >= start.getTime()) total += 1;
+          occurrence += intervalMs;
+        }
+      }
+    } else {
+      total += 7;
+    }
+
+    const medicationLogs = logs.filter((log) => log.medicationId === medication.id && new Date(log.occurredAt) >= start);
+    const uniqueLogs = new Set(medicationLogs.map((log) => log.scheduledAt ?? `${localDateKey(log.occurredAt)}-${log.mealType ?? 'general'}`));
+    taken += uniqueLogs.size;
+    medicationLogs.filter((log) => log.mealType).forEach((log) => { byMeal[log.mealType!].taken += 1; });
+  }
   return { taken, total, byMeal };
 }
 
 export function usualMealTime(events: { mealType: MealType; occurredAt: string }[], mealType: MealType, fallback: string) {
-  const minutes = events.filter((event) => event.mealType === mealType).slice(-14).map((event) => {
-    const date = new Date(event.occurredAt);
-    return date.getHours() * 60 + date.getMinutes();
-  }).sort((a, b) => a - b);
+  const minutes = events
+    .filter((event) => event.mealType === mealType && (event as MealObservation).isOutOfRoutine !== true)
+    .map((event) => ({ event, timestamp: new Date(event.occurredAt).getTime() }))
+    .filter(({ timestamp }) => !Number.isNaN(timestamp))
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .slice(-14)
+    .map(({ event }) => {
+      const date = new Date(event.occurredAt);
+      return date.getHours() * 60 + date.getMinutes();
+    })
+    .sort((a, b) => a - b);
   if (minutes.length < 3) return fallback;
   const middle = Math.floor(minutes.length / 2);
   const learned = minutes.length % 2

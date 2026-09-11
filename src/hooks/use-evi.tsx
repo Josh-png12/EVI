@@ -1,7 +1,9 @@
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppData, AppSettings, DoseLog, MealEvent, MealType, Medication } from '../types';
 import { defaultData, loadData, saveData } from '../services/storage/local-repository';
-import { isMedicationTakenToday } from '../domain/routine';
+import { isMedicationTakenToday, medicationUsesMeal } from '../domain/routine';
+import { isValidTime } from '../domain/date';
+import { localDateKey } from '../domain/date';
 import { rescheduleIfPermitted, scheduleSnoozeNotification } from '../services/notifications/notification-service';
 
 type EviContextValue = {
@@ -17,8 +19,9 @@ type EviContextValue = {
   toggleMedicationActive: (id: string) => Promise<void>;
   deleteMedication: (id: string) => Promise<void>;
   updateSettings: (updates: Partial<AppSettings>) => Promise<void>;
-  recordDose: (medication: Medication, mealType: MealType, note?: string) => Promise<void>;
+  recordDose: (medication: Medication, mealType?: MealType, note?: string, scheduledAt?: string) => Promise<void>;
   snoozeDose: (medication: Medication, mealType: MealType, delayMinutes?: number) => Promise<void>;
+  syncNotifications: () => Promise<void>;
   recordMealEvent: (mealType: MealType) => Promise<void>;
   registerMealEvent: (
     mealType: MealType,
@@ -123,6 +126,7 @@ export function EviProvider({ children }: PropsWithChildren) {
 
       completeOnboarding: async (name, medications, referenceTimes) => {
         await persistAndUpdate((current) => {
+          if (current.onboardingComplete) return current;
           const existingIds = current.medications.map((medication) => medication.id);
           const newMeds: Medication[] = medications.map((m) => {
             const id = generateId(existingIds);
@@ -141,8 +145,16 @@ export function EviProvider({ children }: PropsWithChildren) {
               ...current.settings,
               name: name.trim() || 'Evi',
               referenceTimes: {
-                ...current.settings.referenceTimes,
-                ...referenceTimes,
+              ...current.settings.referenceTimes,
+                breakfast: isValidTime(referenceTimes.breakfast)
+                  ? referenceTimes.breakfast
+                  : current.settings.referenceTimes.breakfast,
+                lunch: isValidTime(referenceTimes.lunch)
+                  ? referenceTimes.lunch
+                  : current.settings.referenceTimes.lunch,
+                dinner: isValidTime(referenceTimes.dinner)
+                  ? referenceTimes.dinner
+                  : current.settings.referenceTimes.dinner,
               },
             },
             medications: [...current.medications, ...newMeds],
@@ -191,14 +203,29 @@ export function EviProvider({ children }: PropsWithChildren) {
         }));
       },
 
-      recordDose: async (medication, mealType, note) => {
+      recordDose: async (medication, mealType, note, scheduledAt) => {
         await persistAndUpdate((current) => {
-          if (isMedicationTakenToday(current.doseLogs, medication.id, mealType)) return current;
+          const currentMedication = current.medications.find((item) => item.id === medication.id);
+          if (
+            !currentMedication ||
+            !currentMedication.active ||
+            (mealType
+              ? !medicationUsesMeal(currentMedication, mealType) || isMedicationTakenToday(current.doseLogs, medication.id, mealType)
+              : medicationUsesMeal(currentMedication))
+          ) return current;
+          const duplicate = scheduledAt
+            ? current.doseLogs.some((log) => log.medicationId === medication.id && log.scheduledAt === scheduledAt)
+            : current.doseLogs.some(
+                (log) => log.medicationId === medication.id && !log.mealType &&
+                  localDateKey(log.occurredAt) === localDateKey(new Date()),
+              );
+          if (duplicate) return current;
           const newLog: DoseLog = {
             id: generateId(current.doseLogs.map((log) => log.id)),
-            medicationId: medication.id,
-            medicationName: medication.name,
+            medicationId: currentMedication.id,
+            medicationName: currentMedication.name,
             mealType,
+            scheduledAt,
             occurredAt: new Date().toISOString(),
             status: 'taken',
             note,
@@ -209,6 +236,12 @@ export function EviProvider({ children }: PropsWithChildren) {
 
       snoozeDose: async (medication, mealType, delayMinutes = 30) => {
         await scheduleSnoozeNotification(medication, mealType, delayMinutes);
+      },
+
+      syncNotifications: async () => {
+        await mutationQueue.current;
+        const current = dataRef.current;
+        await rescheduleIfPermitted(current.medications, current.settings, current.mealEvents);
       },
 
       registerMealEvent,

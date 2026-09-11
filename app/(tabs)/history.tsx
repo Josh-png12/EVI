@@ -77,10 +77,10 @@ export default function HistoryScreen() {
                         <View style={styles.entryInfo}>
                           <View style={styles.entryMealTag}>
                             <Text style={styles.entryMealEmoji}>
-                              {mealMeta[entry.mealType].emoji}
+                              {entry.mealType ? mealMeta[entry.mealType].emoji : '💊'}
                             </Text>
                             <Text style={styles.entryMealLabel}>
-                              {mealMeta[entry.mealType].label}
+                              {entry.mealType ? mealMeta[entry.mealType].label : 'Pauta registrada'}
                             </Text>
                             {entry.occurredAt && (
                               <Text style={styles.entryTime}>

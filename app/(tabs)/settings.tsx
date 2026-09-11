@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEvi } from '../../src/hooks/use-evi';
 import { MealType, Medication, MedicationSchedule, mealMeta, mealTypes } from '../../src/types';
+import { isValidTime } from '../../src/domain/date';
 import { colors, fontSize, radius, spacing } from '../../src/theme';
 import { EviCard } from '../../src/components/EviCard';
 import { ConfirmButton } from '../../src/components/ConfirmButton';
@@ -21,7 +22,6 @@ import { MedicationScheduleForm, scheduleLabel } from '../../src/components/Medi
 import {
   areNativeNotificationsAvailable,
   requestNotificationPermissions,
-  scheduleAllNotifications,
 } from '../../src/services/notifications/notification-service';
 
 export default function SettingsScreen() {
@@ -34,6 +34,7 @@ export default function SettingsScreen() {
     toggleMedicationActive,
     deleteMedication,
     reset,
+    syncNotifications,
   } = useEvi();
   const { settings, medications, mealEvents } = data;
 
@@ -60,14 +61,15 @@ export default function SettingsScreen() {
   const handleSaveTime = async (meal: MealType, val: string) => {
     const updated = { ...times, [meal]: val };
     setTimes(updated);
+    if (!isValidTime(val)) return;
     await updateSettings({ referenceTimes: updated });
   };
 
   const isScheduleComplete = (value?: MedicationSchedule) => {
     if (!value) return false;
     if ((value.type === 'BEFORE_MEAL' || value.type === 'AFTER_MEAL' || value.type === 'WITH_MEAL') && !value.mealTypes?.length) return false;
-    if (value.type === 'INTERVAL' && (!value.intervalHours || !value.time)) return false;
-    if (value.type === 'TIME' && !value.time) return false;
+    if (value.type === 'INTERVAL' && (!value.intervalHours || !isValidTime(value.time))) return false;
+    if (value.type === 'TIME' && !isValidTime(value.time)) return false;
     if (value.type === 'WEEKDAYS' && !value.weekdays?.length) return false;
     if (value.type === 'CUSTOM' && !value.customText?.trim()) return false;
     return true;
@@ -134,7 +136,7 @@ export default function SettingsScreen() {
 
     const result = await requestNotificationPermissions();
     if (result.granted) {
-      await scheduleAllNotifications(medications, settings, mealEvents);
+      await syncNotifications();
       Alert.alert('Notificaciones listas ✨', 'Tus recordatorios locales han sido reprogramados con éxito.');
     } else {
       Alert.alert(

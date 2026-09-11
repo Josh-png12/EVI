@@ -9,3 +9,7 @@ export function localDateKey(value: Date | string): string {
 export function isValidIsoDate(value: unknown): value is string {
   return typeof value === 'string' && !Number.isNaN(new Date(value).getTime());
 }
+
+export function isValidTime(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}

@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useOnboarding } from '../../src/context/onboarding-context';
 import { MedicationSchedule } from '../../src/types';
+import { isValidTime } from '../../src/domain/date';
 import { colors, fontSize, radius, spacing } from '../../src/theme';
 import { ConfirmButton } from '../../src/components/ConfirmButton';
 import { GhostButton } from '../../src/components/GhostButton';
@@ -33,8 +34,8 @@ export default function StepMedicationsScreen() {
   const isScheduleComplete = (value?: MedicationSchedule) => {
     if (!value) return false;
     if ((value.type === 'BEFORE_MEAL' || value.type === 'AFTER_MEAL' || value.type === 'WITH_MEAL') && !value.mealTypes?.length) return false;
-    if (value.type === 'INTERVAL' && (!value.intervalHours || !value.time)) return false;
-    if (value.type === 'TIME' && !value.time) return false;
+    if (value.type === 'INTERVAL' && (!value.intervalHours || !isValidTime(value.time))) return false;
+    if (value.type === 'TIME' && !isValidTime(value.time)) return false;
     if (value.type === 'WEEKDAYS' && !value.weekdays?.length) return false;
     if (value.type === 'CUSTOM' && !value.customText?.trim()) return false;
     return true;

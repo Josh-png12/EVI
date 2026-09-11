@@ -36,7 +36,8 @@ export interface DoseLog {
   id: string;
   medicationId: string;
   medicationName: string;
-  mealType: MealType;
+  mealType?: MealType;
+  scheduledAt?: string;
   occurredAt: string;
   status: 'taken';
   note?: string;
@@ -68,6 +69,8 @@ export interface MedicationStatusItem {
   status: MedicationStatusKind;
   contextLabel: string;
   dueAt?: string;
+  occurrenceAt?: string;
+  mealType?: MealType;
 }
 
 export interface CurrentMedicationStatus {
@@ -118,7 +121,7 @@ export interface HistoryEntry {
   date: string; // YYYY-MM-DD
   medicationId: string;
   medicationName: string;
-  mealType: MealType;
+  mealType?: MealType;
   status: DoseStatus;
   occurredAt?: string;
   note?: string;

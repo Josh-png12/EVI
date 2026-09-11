@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useOnboarding } from '../../src/context/onboarding-context';
@@ -34,8 +34,10 @@ export default function StepPermissionsScreen() {
       router.replace('/(tabs)/home');
     } catch (err) {
       console.error('Error completing onboarding:', err);
-      // Fallback transition
-      router.replace('/(tabs)/home');
+      Alert.alert(
+        'No pudimos guardar tu configuración',
+        'Tus datos no se guardaron. Revisa el almacenamiento disponible e inténtalo nuevamente.',
+      );
     } finally {
       setLoading(false);
     }
@@ -73,6 +75,7 @@ export default function StepPermissionsScreen() {
             title="Ahora no, continuar"
             color={colors.muted}
             onPress={() => handleFinish(false)}
+            disabled={loading}
             style={styles.skipBtn}
           />
         </View>

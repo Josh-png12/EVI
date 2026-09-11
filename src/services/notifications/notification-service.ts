@@ -1,7 +1,7 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { AppSettings, MealEvent, MealType, Medication } from '../../types';
-import { usualMealTime } from '../../domain/routine';
+import { getLearnedMealTime } from '../../domain/routine';
 
 declare const require: (moduleName: string) => unknown;
 
@@ -17,6 +17,7 @@ type NotificationModule = {
   getPermissionsAsync: () => Promise<{ status: string }>;
   requestPermissionsAsync: () => Promise<{ status: string }>;
   cancelAllScheduledNotificationsAsync: () => Promise<void>;
+  getAllScheduledNotificationsAsync: () => Promise<Array<{ identifier: string }>>;
   cancelScheduledNotificationAsync: (identifier: string) => Promise<void>;
   scheduleNotificationAsync: (request: unknown) => Promise<unknown>;
 };
@@ -26,6 +27,7 @@ export type NotificationPermissionResult = { available: boolean; granted: boolea
 const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 const nativeNotificationsAvailable = !isExpoGo;
 let notifications: NotificationModule | null = null;
+let schedulingQueue = Promise.resolve();
 
 function getNotificationsModule(): NotificationModule | null {
   if (!nativeNotificationsAvailable) return null;
@@ -152,7 +154,8 @@ function mealNotificationRequest(
   settings: AppSettings,
   mealEvents: MealEvent[],
 ): unknown | null {
-  const time = parseTime(usualMealTime(mealEvents, mealType, settings.referenceTimes[mealType]));
+  const learned = getLearnedMealTime(mealEvents, mealType, new Date());
+  const time = parseTime(learned.hasEnoughData ? learned.learnedTime : settings.referenceTimes[mealType]);
   if (!time) return null;
   return {
     identifier: notificationId(medication.id, mealType),
@@ -250,11 +253,37 @@ export async function scheduleAllNotifications(
   settings: AppSettings,
   mealEvents: MealEvent[],
 ): Promise<void> {
+  const operation = schedulingQueue.then(() => scheduleAllNotificationsInternal(medications, settings, mealEvents));
+  schedulingQueue = operation.then(() => undefined, () => undefined);
+  await operation;
+}
+
+async function scheduleAllNotificationsInternal(
+  medications: Medication[],
+  settings: AppSettings,
+  mealEvents: MealEvent[],
+): Promise<void> {
   const module = getNotificationsModule();
   if (!module) return;
 
   try {
-    await module.cancelAllScheduledNotificationsAsync();
+    const scheduled = await module.getAllScheduledNotificationsAsync();
+    const activeMedicationIds = new Set(medications.filter((medication) => medication.active).map((medication) => medication.id));
+    await Promise.all(
+      scheduled
+        .filter(({ identifier }) => {
+          if (!identifier.startsWith('evi-snooze-')) return true;
+          return !medications.some(
+            (medication) => activeMedicationIds.has(medication.id) &&
+              identifier.startsWith(`evi-snooze-${medication.id}-`),
+          );
+        })
+        .map(({ identifier }) =>
+          module.cancelScheduledNotificationAsync(identifier).catch((error) => {
+            console.warn('Unable to cancel an old EVI notification', identifier, error);
+          }),
+        ),
+    );
 
     const active = medications.filter((m) => m.active);
 
